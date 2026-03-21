@@ -1,1 +1,29 @@
+## Allure Categories Configuration
+## Place this file as allure-results/categories.json before generating the report
 
+[
+  {
+    "name": "Product Defects",
+    "matchedStatuses": ["failed"],
+    "messageRegex": ".*AssertionError.*"
+  },
+  {
+    "name": "UI Automation Issues",
+    "matchedStatuses": ["failed", "broken"],
+    "messageRegex": ".*ElementNotFoundError.*|.*TimeoutError.*|.*pywinauto.*"
+  },
+  {
+    "name": "AI Enhancement Failures",
+    "matchedStatuses": ["failed", "broken"],
+    "messageRegex": ".*Anthropic.*|.*anthropic.*|.*APIError.*"
+  },
+  {
+    "name": "Test Infrastructure Issues",
+    "matchedStatuses": ["broken"],
+    "messageRegex": ".*RuntimeError.*|.*ConnectionError.*"
+  },
+  {
+    "name": "Skipped Tests",
+    "matchedStatuses": ["skipped"]
+  }
+]
