@@ -1,10 +1,8 @@
 <div align="center">
 
-# 🧮 Calculator Automation Framework
+# AI-Enhanced Windows Desktop Test Automation 
 
-### AI-Enhanced Windows Desktop Test Automation
-
-**pywinauto · pytest · Allure Reports · Claude AI · GitHub Actions**
+**pywinauto · pytest · Allure Reports · AI · GitHub Actions**
 
 ![Python](https://img.shields.io/badge/Python-3.9%2B-blue?style=flat-square&logo=python)
 ![pywinauto](https://img.shields.io/badge/pywinauto-0.6.8-green?style=flat-square)
