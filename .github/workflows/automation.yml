@@ -1,0 +1,188 @@
+name: Calculator Automation CI
+
+# ─────────────────────────────────────────────────────────────
+# Triggers
+# ─────────────────────────────────────────────────────────────
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    # Nightly regression at 02:00 UTC
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+    inputs:
+      test_suite:
+        description: "Test suite to run (smoke | regression | all)"
+        required: false
+        default: "all"
+
+# ─────────────────────────────────────────────────────────────
+# Permissions (needed for GitHub Pages deployment)
+# ─────────────────────────────────────────────────────────────
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+# ─────────────────────────────────────────────────────────────
+# Job: run-tests
+# ─────────────────────────────────────────────────────────────
+jobs:
+  run-tests:
+    name: Run Calculator Tests (Windows)
+    runs-on: windows-latest          # pywinauto requires a real Windows desktop
+
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      ALLURE_RESULTS_DIR: allure-results
+      ALLURE_REPORT_DIR: allure-report
+
+    steps:
+      # ── 1. Checkout ──────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── 2. Python setup ──────────────────────────────────────
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      # ── 3. Install dependencies ───────────────────────────────
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      # ── 4. Java (Allure CLI needs JRE) ────────────────────────
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: "17"
+          distribution: temurin
+
+      # ── 5. Install Allure CLI ─────────────────────────────────
+      - name: Install Allure CLI
+        run: |
+          $url = "https://github.com/allure-framework/allure2/releases/download/2.27.0/allure-2.27.0.zip"
+          Invoke-WebRequest -Uri $url -OutFile allure.zip
+          Expand-Archive allure.zip -DestinationPath C:\allure
+          echo "C:\allure\allure-2.27.0\bin" | Out-File -Append -FilePath $env:GITHUB_PATH
+        shell: pwsh
+
+      # ── 6. Prepare result directories ────────────────────────
+      - name: Create directories
+        run: |
+          mkdir -Force allure-results
+          mkdir -Force allure-report
+          mkdir -Force screenshots
+          mkdir -Force logs
+        shell: pwsh
+
+      # ── 7. Restore Allure history ─────────────────────────────
+      - name: Restore Allure history
+        uses: actions/cache@v4
+        with:
+          path: allure-results/history
+          key: allure-history-${{ github.ref_name }}
+          restore-keys: |
+            allure-history-main
+            allure-history-
+
+      # ── 8. Determine marker filter ────────────────────────────
+      - name: Set test markers
+        id: markers
+        run: |
+          $suite = "${{ github.event.inputs.test_suite }}"
+          if ($suite -eq "smoke") {
+            echo "MARKER=-m smoke" >> $env:GITHUB_OUTPUT
+          } elseif ($suite -eq "regression") {
+            echo "MARKER=-m regression" >> $env:GITHUB_OUTPUT
+          } else {
+            echo "MARKER=" >> $env:GITHUB_OUTPUT
+          }
+        shell: pwsh
+
+      # ── 9. Run tests ──────────────────────────────────────────
+      - name: Run pytest with Allure
+        run: |
+          pytest tests/ `
+            --alluredir=allure-results `
+            ${{ steps.markers.outputs.MARKER }} `
+            --timeout=60 `
+            -v `
+            --tb=short
+        shell: pwsh
+        continue-on-error: true          # collect results even on failure
+
+      # ── 10. Generate Allure HTML report ──────────────────────
+      - name: Generate Allure report
+        if: always()
+        run: |
+          allure generate allure-results `
+            --clean `
+            --output allure-report
+        shell: pwsh
+
+      # ── 11. Upload raw results artifact ──────────────────────
+      - name: Upload Allure results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-results-${{ github.run_number }}
+          path: allure-results/
+          retention-days: 30
+
+      # ── 12. Upload HTML report artifact ──────────────────────
+      - name: Upload Allure report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-report-${{ github.run_number }}
+          path: allure-report/
+          retention-days: 30
+
+      # ── 13. Upload screenshots on failure ────────────────────
+      - name: Upload failure screenshots
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots-${{ github.run_number }}
+          path: screenshots/
+          retention-days: 7
+
+      # ── 14. Upload logs ───────────────────────────────────────
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-${{ github.run_number }}
+          path: logs/
+          retention-days: 7
+
+      # ── 15. Publish report to GitHub Pages ───────────────────
+      - name: Deploy to GitHub Pages
+        if: github.ref == 'refs/heads/main' && always()
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: allure-report
+          publish_branch: gh-pages
+          destination_dir: allure-report
+
+      # ── 16. Post summary to job ───────────────────────────────
+      - name: Write job summary
+        if: always()
+        run: |
+          echo "## 🧮 Calculator Automation Report" >> $env:GITHUB_STEP_SUMMARY
+          echo "" >> $env:GITHUB_STEP_SUMMARY
+          echo "| Item | Value |" >> $env:GITHUB_STEP_SUMMARY
+          echo "|------|-------|" >> $env:GITHUB_STEP_SUMMARY
+          echo "| Run  | ${{ github.run_number }} |" >> $env:GITHUB_STEP_SUMMARY
+          echo "| Branch | ${{ github.ref_name }} |" >> $env:GITHUB_STEP_SUMMARY
+          echo "| Suite | ${{ github.event.inputs.test_suite || 'all' }} |" >> $env:GITHUB_STEP_SUMMARY
+          echo "| AI Model | claude-sonnet-4-20250514 |" >> $env:GITHUB_STEP_SUMMARY
+          echo "" >> $env:GITHUB_STEP_SUMMARY
+          echo "📊 [View full Allure report](https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/allure-report)" >> $env:GITHUB_STEP_SUMMARY
+        shell: pwsh
